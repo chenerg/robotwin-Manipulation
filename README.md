@@ -134,6 +134,10 @@ HF_MAX_WORKERS=8 HF_EXTRACT_WORKERS=16 bash scripts/download_xpolicylab_data.sh
 Downloads land under `data/demo_clean/<task_name>/aloha_agilex/data/` (note: self-collected data lands under `data/<task_config>/...` instead).
 
 ## 2. Task Running and Data Collection (Optional)
+
+For interactive human control with three camera views, EE-local translation/rotation inputs,
+and local coordinate axes, see [Browser-based human control](teleop_web/README.md).
+
 For custom task configs, domain randomization, or embodiment setups, collect data yourself. The following command will first search for a random seed for the target collection quantity, and then replay the seed to collect data.
 
 ```

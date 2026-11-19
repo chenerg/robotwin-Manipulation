@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RoboTwin · 人工控制</title>
+    <link rel="stylesheet" href="/style.css" />
+    <script type="module" src="/app.js"></script>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <span class="eyebrow">ROBOTWIN / HUMAN CONTROL</span>
+          <h1>双臂交互控制台</h1>
+        </div>
+        <div class="connection">
+          <span id="connection-dot"></span><span id="connection">正在连接</span
+          ><button id="claim">获取控制权</button>
+        </div>
+      </header>
+      <section class="toolbar" aria-label="场景设置">
+        <label>任务<select id="task"></select></label>
+        <label>场景配置<select id="config"></select></label>
+        <label
+          >随机种子<input
+            id="seed"
+            type="number"
+            min="0"
+            max="4294967295"
+            step="1"
+            value="0"
+        /></label>
+        <button id="reset">重建所选场景</button>
+        <span id="scene-info">等待场景信息</span>
+      </section>
+      <section class="vision" aria-label="实时相机">
+        <figure>
+          <figcaption><span>01 / 主视角</span><span>HEAD</span></figcaption>
+          <div class="camera">
+            <canvas id="head_camera" width="640" height="480"></canvas>
+            <p class="placeholder">等待头部相机</p>
+          </div>
+        </figure>
+        <figure>
+          <figcaption>
+            <span>02 / 左腕视角</span><span>LEFT WRIST</span>
+          </figcaption>
+          <div class="camera">
+            <canvas id="left_camera" width="640" height="480"></canvas>
+            <p class="placeholder">等待左腕相机</p>
+          </div>
+        </figure>
+        <figure>
+          <figcaption>
+            <span>03 / 右腕视角</span><span>RIGHT WRIST</span>
+          </figcaption>
+          <div class="camera">
+            <canvas id="right_camera" width="640" height="480"></canvas>
+            <p class="placeholder">等待右腕相机</p>
+          </div>
+        </figure>
+      </section>
+      <section class="view-options" aria-label="坐标系显示">
+        <span>EE 局部坐标系</span>
+        <label><input id="axis-left" type="checkbox" checked />左夹爪</label>
+        <label><input id="axis-right" type="checkbox" checked />右夹爪</label>
+        <label
+          >轴长<input
+            id="axis-length"
+            type="number"
+            min="0.005"
+            max="1"
+            step="0.005"
+            value="0.05"
+          />m</label
+        >
+        <span class="legend"
+          ><b class="x">X</b><b class="y">Y</b><b class="z">Z</b></span
+        >
+        <span id="frame-info">尚无图像</span>
+      </section>
+      <div class="workspace">
+        <section
+          class="arm-panel"
+          data-arm="left"
+          aria-labelledby="left-title"
+        ></section>
+        <section
+          class="arm-panel"
+          data-arm="right"
+          aria-labelledby="right-title"
+        ></section>
+        <aside>
+          <span class="eyebrow">EXECUTION</span>
+          <h2 id="phase">等待仿真初始化</h2>
+          <p id="task-success">任务状态：等待观测</p>
+          <button id="both" class="primary">双臂一起执行</button>
+          <button id="stop" class="stop">停止当前运动</button>
+          <p class="hint">
+            每次操作都以指令开始时的实际 EE 为原点。X/Y/Z
+            为局部平移；roll/pitch/yaw 分别绕局部 X/Y/Z，按右手规则取正。
+          </p>
+          <p class="hint">
+            组合旋转：Rz(yaw) · Ry(pitch) · Rx(roll)。纯旋转保持 EE 原点；TCP
+            在其前方 12 cm。
+          </p>
+          <p id="feedback" role="status" aria-live="polite">
+            连接后获取控制权即可操作。
+          </p>
+        </aside>
+      </div>
+      <section class="history">
+        <div class="history-heading">
+          <h2>操作记录</h2>
+          <button id="clear-log">清空记录</button>
+        </div>
+        <ol id="log" aria-live="polite"></ol>
+      </section>
+      <footer>
+        图像中的坐标轴为投影叠加，不参与物理碰撞。EE
+        原点不在视野内时，角落指示器仅表示轴向。
+      </footer>
+    </main>
+  </body>
+</html>
