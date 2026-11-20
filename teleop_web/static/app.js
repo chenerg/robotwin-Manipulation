@@ -43,7 +43,7 @@ for (const arm of arms) {
     ["yaw", "Δyaw", "°"],
   ];
   document.querySelector(`[data-arm="${arm}"]`).innerHTML = `
-    <div class="arm-heading"><h2 id="${arm}-title">${names[arm]}夹爪</h2><span>${arm.toUpperCase()} / EE LOCAL</span></div>
+    <div class="arm-heading"><h2 id="${arm}-title">${names[arm]}夹爪</h2><span>${arm.toUpperCase()} / TCP LOCAL</span></div>
     <div class="fields">${fields.map(([key, label, unit]) => `<label for="${arm}-${key}">${label} <span class="unit">${unit}</span><input id="${arm}-${key}" type="number" step="any" value="0"></label>`).join("")}</div>
     <div class="gripper"><label><input id="${arm}-gripper-enabled" type="checkbox">同时设置夹爪开合<input id="${arm}-gripper" aria-label="${names[arm]}夹爪开合值" type="number" min="0" max="1" step="any" value="1"></label></div>
     <div class="arm-actions"><button id="${arm}-execute" class="primary">执行${names[arm]}臂</button><button id="${arm}-zero">清零增量</button></div>
@@ -91,7 +91,7 @@ function move(selected) {
       type: "move",
       command_id:
         globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`,
-      frame: "endpose_local",
+      frame: "tcp_local",
       left: null,
       right: null,
     };
@@ -302,10 +302,10 @@ function applyState(next) {
   for (const arm of arms) {
     if (event.targets?.[arm])
       $(`${arm}-target`).textContent =
-        `世界目标\n${displayPose(event.targets[arm])}`;
+        `TCP 世界目标\n${displayPose(event.targets[arm])}`;
     if (event.actual_poses?.[arm])
       $(`${arm}-pose`).textContent =
-        `实际 EE（世界系）\n${displayPose(event.actual_poses[arm])}`;
+        `实际 TCP（世界系）\n${displayPose(event.actual_poses[arm])}`;
   }
   updateControls();
 }
@@ -368,7 +368,7 @@ async function decodeFrames() {
         `任务状态：${meta.task_success ? "已满足成功条件" : "进行中"}`;
       arms.forEach((arm) => {
         $(`${arm}-pose`).textContent =
-          `实际 EE（世界系）\n${displayPose(meta.poses[arm])}\n开合 实际 ${meta.gripper_positions[arm].toFixed(2)} / 目标 ${meta.grippers[arm].toFixed(2)}`;
+          `实际 TCP（世界系）\n${displayPose(meta.poses[arm])}\n开合 实际 ${meta.gripper_positions[arm].toFixed(2)} / 目标 ${meta.grippers[arm].toFixed(2)}`;
       });
     }
   } catch (error) {

@@ -10,6 +10,8 @@ from pathlib import Path
 import numpy as np
 import yaml
 
+from .geometry import tcp_to_ee
+
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG_ROOT = ROOT / "env_cfg" / "task_config"
 
@@ -162,7 +164,10 @@ class RobotwinSession:
         self.sim_time = 0.0
 
     def poses(self):
-        return {arm: self.env.get_arm_pose(arm) for arm in ("left", "right")}
+        return {
+            arm: getattr(self.robot, f"get_{arm}_tcp_pose")()
+            for arm in ("left", "right")
+        }
 
     def measured_joints(self, arm):
         return np.asarray(
@@ -186,7 +191,7 @@ class RobotwinSession:
             requests[arm] = {
                 "qpos": getattr(self.robot, f"{arm}_entity").get_qpos().copy(),
                 "target_pose": self.robot._trans_from_gripper_to_endlink(
-                    target, arm_tag=arm
+                    tcp_to_ee(target), arm_tag=arm
                 ),
                 "arms_tag": arm,
                 "constraint_pose": None,

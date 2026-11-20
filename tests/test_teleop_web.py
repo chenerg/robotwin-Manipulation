@@ -9,23 +9,33 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock, patch
 
 import numpy as np
 from websockets.asyncio.client import connect
 from websockets.asyncio.server import serve
 
 from teleop_web.controller import Controller
-from teleop_web.geometry import camera_axes, local_target, pose_error, quat_matrix
+from teleop_web.geometry import (
+    camera_axes,
+    ee_to_tcp,
+    local_target,
+    pose_error,
+    quat_matrix,
+    tcp_to_ee,
+)
 from teleop_web.protocol import pack_frame, validate_move
 from teleop_web.server import TeleopServer
 from teleop_web.session import (
     CONFIG_ROOT,
+    RobotwinSession,
     catalog,
     load_task_args,
     normalize_embodiment,
     validate_scene,
 )
+from teleop_web.worker import capture_frame
 
 
 def command(
@@ -40,7 +50,7 @@ def command(
         "type": "move",
         "command_id": "test-command",
         "scene_id": "test-scene",
-        "frame": "endpose_local",
+        "frame": "tcp_local",
         "left": copy.deepcopy(data) if left else None,
         "right": copy.deepcopy(data) if right else None,
     }
@@ -48,7 +58,7 @@ def command(
 
 class GeometryTests(unittest.TestCase):
     def test_translation_uses_current_local_axes(self):
-        # Local +X of an EE rotated 90 degrees around world Z is world +Y.
+        # Local +X of a TCP rotated 90 degrees around world Z is world +Y.
         s = 2**-0.5
         actual = [1, 2, 3, s, 0, 0, s]
         target = local_target(actual, [0.1, 0, 0], [0, 0, 0])
@@ -64,12 +74,25 @@ class GeometryTests(unittest.TestCase):
             quat_matrix(target[3:]), rz @ rz @ ry @ rx, atol=1e-12
         )
 
-    def test_rotation_pivots_about_ee_not_tcp(self):
-        initial = [0.4, 0.2, 0.8, 1, 0, 0, 0]
-        target = local_target(initial, [0, 0, 0], [0, 0, 90])
-        np.testing.assert_equal(target[:3], initial[:3])
-        tcp = np.asarray(target[:3]) + quat_matrix(target[3:]) @ [0.12, 0, 0]
-        np.testing.assert_allclose(tcp, [0.4, 0.32, 0.8], atol=1e-12)
+    def test_rotation_holds_tcp_and_moves_original_ee(self):
+        ee_initial = [0.4, 0.2, 0.8, 1, 0, 0, 0]
+        tcp_initial = ee_to_tcp(ee_initial)
+        target = local_target(tcp_initial, [0, 0, 0], [0, 0, 90])
+        np.testing.assert_equal(target[:3], tcp_initial[:3])
+        ee_target = tcp_to_ee(target)
+        np.testing.assert_allclose(ee_target[:3], [0.52, 0.08, 0.8], atol=1e-12)
+        np.testing.assert_allclose(ee_to_tcp(ee_target), target, atol=1e-12)
+
+    def test_tcp_offset_uses_pose_orientation_and_roundtrips(self):
+        ee = [0.4, 0.2, 0.8, 2**-0.5, 0, 0, 2**-0.5]
+        tcp = ee_to_tcp(ee)
+        np.testing.assert_allclose(tcp[:3], [0.4, 0.32, 0.8], atol=1e-12)
+        np.testing.assert_allclose(tcp_to_ee(tcp), ee, atol=1e-12)
+        # Position error must be measured at TCP, including orientation's offset.
+        rotated_ee = local_target(ee, [0, 0, 0], [0, 0, 90])
+        self.assertAlmostEqual(
+            pose_error(tcp, ee_to_tcp(rotated_ee))["position_m"], 0.12 * 2**0.5
+        )
 
     def test_sign_invariant_rotation_error(self):
         a = [0, 0, 0, 1, 0, 0, 0]
@@ -83,6 +106,10 @@ class GeometryTests(unittest.TestCase):
 
 
 class ProtocolTests(unittest.TestCase):
+    def test_reject_legacy_ee_frame_instead_of_moving_with_wrong_pivot(self):
+        with self.assertRaisesRegex(ValueError, "tcp_local"):
+            validate_move({**command(), "frame": "endpose_local"})
+
     def test_named_rpy_fields_do_not_depend_on_json_key_order(self):
         msg = command(rotation=(1, 2, 3))
         msg["left"]["rotation_deg"] = {"yaw": 3, "roll": 1, "pitch": 2}
@@ -189,6 +216,61 @@ class SceneConfigTests(unittest.TestCase):
                 self.assertEqual(
                     integrated["left_robot_file"], integrated["right_robot_file"]
                 )
+
+
+class TcpSessionTests(unittest.TestCase):
+    def test_control_reads_tcp_and_converts_rotated_target_before_planning(self):
+        session = RobotwinSession.__new__(RobotwinSession)
+        session.robot = Mock()
+        session.robot.get_left_tcp_pose.return_value = [0.52, 0.2, 0.8, 1, 0, 0, 0]
+        session.robot.get_right_tcp_pose.return_value = [0, 0, 0.8, 1, 0, 0, 0]
+        actual = session.poses()
+        target = local_target(actual["left"], [0, 0, 0], [0, 0, 90])
+        session.robot.left_entity.get_qpos.return_value = np.zeros(8)
+        requests = session.plan_requests({"left": target})
+        ee_target = session.robot._trans_from_gripper_to_endlink.call_args.args[0]
+        np.testing.assert_allclose(ee_target[:3], [0.52, 0.08, 0.8], atol=1e-12)
+        np.testing.assert_allclose(ee_to_tcp(ee_target), target, atol=1e-12)
+        self.assertEqual(
+            session.robot._trans_from_gripper_to_endlink.call_args.kwargs,
+            {"arm_tag": "left"},
+        )
+        np.testing.assert_equal(requests["left"]["qpos"], np.zeros(8))
+        session.robot.right_entity.get_qpos.assert_not_called()
+
+    def test_frame_pose_and_axes_use_tcp_from_same_observation(self):
+        ee = [0.4, 0.2, 0.8, 2**-0.5, 0, 0, 2**-0.5]
+        extrinsic = np.eye(4)
+        camera = {
+            "rgb": np.zeros((4, 4, 3), dtype=np.uint8),
+            "intrinsic_cv": np.eye(3),
+            "extrinsic_cv": extrinsic,
+        }
+        session = Mock(sim_time=1.0)
+        session.observe.return_value = {
+            "endpose": {"left_endpose": ee, "right_endpose": ee},
+            "observation": {
+                name: camera for name in ("head_camera", "left_camera", "right_camera")
+            },
+        }
+        session.gripper.return_value = session.measured_gripper.return_value = 0.4
+        session.success.return_value = False
+        encoder = SimpleNamespace(
+            COLOR_RGB2BGR=1,
+            IMWRITE_JPEG_QUALITY=2,
+            cvtColor=lambda image, _: image,
+            imencode=lambda *args: (True, np.array([1, 2, 3], dtype=np.uint8)),
+        )
+        with patch.dict("sys.modules", {"cv2": encoder}):
+            packet = capture_frame(session, "scene", 1, "ready", 80)
+        size = struct.unpack("!I", packet[:4])[0]
+        metadata = json.loads(packet[4 : 4 + size])
+        self.assertEqual(metadata["pose_frame"], "tcp")
+        np.testing.assert_allclose(metadata["poses"]["left"][:3], [0.4, 0.32, 0.8])
+        axes = metadata["cameras"][0]["axes"]["left"]
+        np.testing.assert_allclose(axes["origin"], [0.4, 0.32, 0.8])
+        np.testing.assert_allclose(axes["basis"], quat_matrix(ee[3:]), atol=1e-12)
+        session.poses.assert_not_called()
 
 
 class StubSession:

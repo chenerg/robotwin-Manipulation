@@ -18,8 +18,8 @@ BUSY_PHASES = {
 
 
 def validate_move(message):
-    if message.get("frame") != "endpose_local":
-        raise ValueError("frame must be endpose_local")
+    if message.get("frame") != "tcp_local":
+        raise ValueError("frame must be tcp_local; refresh the control page")
     command_id = message.get("command_id")
     if not isinstance(command_id, str) or not 1 <= len(command_id) <= 128:
         raise ValueError(
@@ -29,7 +29,7 @@ def validate_move(message):
         "type": "move",
         "scene_id": message.get("scene_id"),
         "command_id": command_id,
-        "frame": "endpose_local",
+        "frame": "tcp_local",
     }
     for arm in ("left", "right"):
         data = message.get(arm)

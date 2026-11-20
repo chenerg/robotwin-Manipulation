@@ -138,7 +138,7 @@ export function drawAxes(context, camera, options) {
       context.fillRect(x, y, 124, 91);
       context.fillStyle = "#dce9f8";
       context.font = "11px system-ui";
-      context.fillText(`${prefix} · EE 轴向（非原点）`, x + 5, y + 15);
+      context.fillText(`${prefix} · TCP 轴向（非原点）`, x + 5, y + 15);
       const start = [x + 61, y + 58];
       [0, 1, 2].forEach((axis) => {
         const vx = axes.basis[0][axis],

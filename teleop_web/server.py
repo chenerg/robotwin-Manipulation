@@ -59,6 +59,7 @@ class TeleopServer:
             "owner": self.owner,
             "last_event": self.last_event,
             "observation": self.last_observation,
+            "pose_frame": "tcp",
             "history_entry": self.history_entry,
         }
         if include_history:

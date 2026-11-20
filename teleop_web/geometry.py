@@ -1,4 +1,4 @@
-"""EE-local rigid transforms. All simulator quaternions use wxyz."""
+"""TCP-local rigid transforms. All simulator quaternions use wxyz."""
 
 import math
 
@@ -45,11 +45,27 @@ def quat_product(a, b):
     return result / np.linalg.norm(result)
 
 
+def _offset_pose(pose, distance):
+    result = np.asarray(pose, dtype=float).copy()
+    result[:3] += quat_matrix(result[3:]) @ [distance, 0, 0]
+    return result.tolist()
+
+
+def ee_to_tcp(pose):
+    """Match Robot._trans_endpose: TCP is 0.12 m along EE's local +X."""
+    return _offset_pose(pose, 0.12)
+
+
+def tcp_to_ee(pose):
+    """Convert a TCP target to the EE target expected by RoboTwin planning."""
+    return _offset_pose(pose, -0.12)
+
+
 def local_target(pose, translation, rotation_deg):
     """T_target = T_actual @ delta_T; delta_R = Rz(yaw) Ry(pitch) Rx(roll).
 
-    Rotation is about the EE origin, NOT the TCP. Translation is expressed in
-    the original EE axes and is independent of the rotation in this command.
+    The input and target are TCP poses. Rotation holds the TCP origin fixed.
+    Translation uses the starting TCP axes, independent of this rotation.
     """
     pose = np.asarray(pose, dtype=float)
     roll, pitch, yaw = np.radians(rotation_deg) / 2
@@ -79,7 +95,7 @@ def pose_error(target, actual):
 
 
 def camera_axes(pose, extrinsic_cv):
-    """World EE origin/basis -> OpenCV camera frame (right, down, forward)."""
+    """World TCP origin/basis -> OpenCV camera frame (right, down, forward)."""
     extrinsic = np.asarray(extrinsic_cv, dtype=float)
     return {
         "origin": (extrinsic[:3, :3] @ pose[:3] + extrinsic[:3, 3]).tolist(),

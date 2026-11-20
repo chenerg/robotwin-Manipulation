@@ -45,5 +45,5 @@ assert.equal(partial.tipVisible, false);
 assert.equal(clipLine([-2, -2], [-1, -1], 320, 240), null);
 assert.deepEqual(clipLine([-10, 120], [330, 120], 320, 240).start, [0, 120]);
 console.log(
-  "EE projection: camera axes, near/far clipping, viewport clipping passed",
+  "TCP projection: camera axes, near/far clipping, viewport clipping passed",
 );

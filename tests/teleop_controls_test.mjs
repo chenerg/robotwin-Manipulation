@@ -135,6 +135,7 @@ const submit = (both = false) => {
   element("right-x").value = "7";
   element(both ? "both" : "left-execute").onclick();
   const command = control.sent.at(-1);
+  assert.equal(command.frame, "tcp_local");
   assert.equal(command.left.translation_m[0], 0.025);
   assert.equal(command.left.rotation_deg.roll, 0.5);
   assert.equal(command.left.gripper, 0.4);

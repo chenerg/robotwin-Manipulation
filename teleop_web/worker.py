@@ -10,7 +10,7 @@ import traceback
 import numpy as np
 
 from .controller import Controller
-from .geometry import camera_axes
+from .geometry import camera_axes, ee_to_tcp
 from .protocol import CAMERAS, pack_frame
 
 
@@ -32,7 +32,11 @@ def capture_frame(session, scene_id, frame_id, phase, quality):
     import cv2
 
     observation = session.observe()
-    poses = {arm: observation["endpose"][f"{arm}_endpose"] for arm in ("left", "right")}
+    # Convert the observation's EE poses so overlays stay aligned to this frame.
+    poses = {
+        arm: ee_to_tcp(observation["endpose"][f"{arm}_endpose"])
+        for arm in ("left", "right")
+    }
     metadata = {
         "scene_id": scene_id,
         "frame_id": frame_id,
@@ -40,6 +44,7 @@ def capture_frame(session, scene_id, frame_id, phase, quality):
         "captured_at": time.time(),
         "phase": phase,
         "poses": poses,
+        "pose_frame": "tcp",
         "grippers": {arm: session.gripper(arm) for arm in poses},
         "gripper_positions": {arm: session.measured_gripper(arm) for arm in poses},
         "task_success": session.success(),

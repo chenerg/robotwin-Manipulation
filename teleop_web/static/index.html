@@ -85,7 +85,7 @@
         </figure>
       </section>
       <section class="view-options" aria-label="坐标系显示">
-        <span>EE 局部坐标系</span>
+        <span>TCP 局部坐标系</span>
         <label><input id="axis-left" type="checkbox" checked />左夹爪</label>
         <label><input id="axis-right" type="checkbox" checked />右夹爪</label>
         <label
@@ -121,12 +121,12 @@
           <button id="both" class="primary">双臂一起执行</button>
           <button id="stop" class="stop">停止当前运动</button>
           <p class="hint">
-            每次操作都以指令开始时的实际 EE 为原点。X/Y/Z
+            每次操作都以指令开始时的实际 TCP 为原点。X/Y/Z
             为局部平移；roll/pitch/yaw 分别绕局部 X/Y/Z，按右手规则取正。
           </p>
           <p class="hint">
-            组合旋转：Rz(yaw) · Ry(pitch) · Rx(roll)。纯旋转保持 EE 原点；TCP
-            在其前方 12 cm。
+            组合旋转：Rz(yaw) · Ry(pitch) · Rx(roll)。纯旋转保持 TCP 目标位置；
+            TCP 沿用 RoboTwin 的定义，位于原 EE 的局部 +X 方向 12 cm。
           </p>
           <p id="feedback" role="status" aria-live="polite">
             连接后获取控制权即可操作。
@@ -148,7 +148,7 @@
         <ol id="log" aria-live="polite"></ol>
       </section>
       <footer>
-        图像中的坐标轴为投影叠加，不参与物理碰撞。EE
+        图像中的坐标轴为投影叠加，不参与物理碰撞。TCP
         原点不在视野内时，角落指示器仅表示轴向。
       </footer>
     </main>

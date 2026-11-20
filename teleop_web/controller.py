@@ -1,4 +1,4 @@
-"""One discrete EE-local command at a time, with interruptible trajectory stepping."""
+"""One discrete TCP-local command at a time, with interruptible trajectory stepping."""
 
 from concurrent.futures import ThreadPoolExecutor
 
