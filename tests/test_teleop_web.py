@@ -5,8 +5,11 @@ import copy
 import json
 import queue
 import struct
+import tempfile
 import threading
 import unittest
+from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import numpy as np
 from websockets.asyncio.client import connect
@@ -16,7 +19,13 @@ from teleop_web.controller import Controller
 from teleop_web.geometry import camera_axes, local_target, pose_error, quat_matrix
 from teleop_web.protocol import pack_frame, validate_move
 from teleop_web.server import TeleopServer
-from teleop_web.session import validate_scene
+from teleop_web.session import (
+    CONFIG_ROOT,
+    catalog,
+    load_task_args,
+    normalize_embodiment,
+    validate_scene,
+)
 
 
 def command(
@@ -110,6 +119,76 @@ class ProtocolTests(unittest.TestCase):
         for seed in (True, -1, 0.5, 2**32):
             with self.assertRaises(ValueError):
                 validate_scene("handover_block", "demo_clean", seed)
+
+
+class SceneConfigTests(unittest.TestCase):
+    def test_choices_follow_registries_without_requiring_assets(self):
+        import yaml
+
+        choices = catalog()
+        for key, filename in (
+            ("embodiments", "_embodiment_config.yml"),
+            ("camera_types", "_camera_config.yml"),
+        ):
+            with (CONFIG_ROOT / filename).open() as file:
+                self.assertEqual(choices[key], sorted(yaml.safe_load(file)))
+        self.assertEqual(
+            normalize_embodiment(["piper", "franka-panda", "0.6"]),
+            ["piper", "franka-panda", 0.6],
+        )
+        for embodiment in (
+            ["unknown"],
+            ["piper", "piper"],
+            ["piper", "piper", True],
+            ["piper", "piper", "nan"],
+            ["piper", "piper", 0],
+        ):
+            with self.subTest(embodiment=embodiment), self.assertRaises(ValueError):
+                normalize_embodiment(embodiment)
+        with self.assertRaises(ValueError):
+            validate_scene(
+                "handover_block", "demo_clean", 0, head_camera_type="unknown"
+            )
+
+    def test_overrides_load_selected_assets_and_camera_dimensions(self):
+        import yaml
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for robot in ("aloha-agilex", "piper", "franka-panda"):
+                asset = root / "assets" / "embodiments" / robot
+                asset.mkdir(parents=True)
+                (asset / "config.yml").write_text(yaml.safe_dump({"name": robot}))
+            with patch("teleop_web.session.ROOT", root):
+                default = load_task_args("handover_block", "demo_clean")
+                self.assertEqual(default["embodiment"], ["aloha-agilex"])
+                self.assertEqual(default["camera"]["head_camera_type"], "D435")
+                self.assertEqual(
+                    (default["head_camera_w"], default["head_camera_h"]), (320, 240)
+                )
+                overridden = load_task_args(
+                    "handover_block",
+                    "demo_clean",
+                    ["piper", "franka-panda", 0.6],
+                    "Large_L515",
+                    "L515",
+                )
+                self.assertEqual(overridden["left_embodiment_config"]["name"], "piper")
+                self.assertEqual(
+                    overridden["right_embodiment_config"]["name"], "franka-panda"
+                )
+                self.assertFalse(overridden["dual_arm_embodied"])
+                self.assertEqual(overridden["embodiment_dis"], 0.6)
+                self.assertEqual(overridden["camera"]["wrist_camera_type"], "L515")
+                self.assertEqual(
+                    (overridden["head_camera_w"], overridden["head_camera_h"]),
+                    (640, 360),
+                )
+                integrated = load_task_args("handover_block", "demo_clean", ["piper"])
+                self.assertTrue(integrated["dual_arm_embodied"])
+                self.assertEqual(
+                    integrated["left_robot_file"], integrated["right_robot_file"]
+                )
 
 
 class StubSession:
@@ -311,6 +390,90 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 await asyncio.wait_for(connection.recv(), timeout=2), packet
             )
+
+    async def test_history_retains_command_and_outcome_on_reconnect(self):
+        self.app.owner = "controller"
+        original = command(right=True, rotation=(1, 2, 3), gripper=0.4)
+        self.app.dispatch("controller", original)
+        original["left"]["translation_m"][0] = 999
+        self.app.record_event(
+            {
+                "type": "state",
+                "command_id": "test-command",
+                "phase": "accepted",
+                "base_poses": {"left": [0, 0, 0, 1, 0, 0, 0]},
+                "targets": {"left": [0.01, 0, 0, 1, 0, 0, 0]},
+            }
+        )
+        event = {
+            "type": "state",
+            "command_id": "test-command",
+            "phase": "failed",
+            "actual_poses": {"left": [0.005, 0, 0, 1, 0, 0, 0]},
+            "errors": {"left": {"position_m": 0.005, "rotation_deg": 0}},
+        }
+        self.app.record_event(event)
+        self.app.record_event(event)  # Repeated outcomes must not duplicate a row.
+        async with connect(f"ws://127.0.0.1:{self.port}/ws/control") as connection:
+            state = json.loads(await connection.recv())["state"]
+        self.assertEqual(len(state["history"]), 1)
+        row = state["history"][0]
+        self.assertEqual(row["left"]["translation_m"], [0.01, 0, 0])
+        self.assertEqual(row["left"]["rotation_deg"], [1, 2, 3])
+        self.assertEqual(row["right"]["gripper"], 0.4)
+        self.assertEqual(row["phase"], "failed")
+        self.assertIn("base_poses", row)
+        self.assertIn("actual_poses", row)
+        self.assertNotIn("history", self.app.snapshot())
+
+    async def test_error_terminates_active_history_but_busy_rejection_adds_no_row(self):
+        self.app.owner = "controller"
+        self.app.dispatch("controller", command())
+        with self.assertRaises(ValueError):
+            self.app.dispatch("controller", {**command(), "command_id": "busy-command"})
+        self.assertEqual(len(self.app.history), 1)
+        self.app.record_event(
+            {"type": "state", "phase": "error", "error": "worker exited"}
+        )
+        self.assertEqual(self.app.history_entry["phase"], "failed")
+        self.assertEqual(self.app.history_entry["error"], "worker exited")
+
+    async def test_reset_validates_and_passes_registry_overrides(self):
+        self.app.owner = "controller"
+        message = {
+            "type": "reset",
+            "scene_id": "test-scene",
+            "embodiment": ["piper", "franka-panda", 0.6],
+            "head_camera_type": "L515",
+            "wrist_camera_type": "Large_L515",
+        }
+        with patch.object(self.app, "reset", new_callable=AsyncMock) as reset:
+            self.app.dispatch("controller", message)
+            await self.app.reset_task
+            settings = reset.call_args.args[0]
+            self.assertEqual(settings["embodiment"], message["embodiment"])
+            self.assertEqual(settings["head_camera_type"], "L515")
+            self.assertEqual(settings["wrist_camera_type"], "Large_L515")
+        self.app.resetting = False
+        with self.assertRaises(ValueError):
+            self.app.dispatch(
+                "controller", {**message, "embodiment": ["not-registered"]}
+            )
+        with self.assertRaises(ValueError):
+            self.app.dispatch(
+                "controller", {**message, "head_camera_type": "not-registered"}
+            )
+
+    async def test_new_scene_clears_history(self):
+        self.app.owner = "controller"
+        self.app.dispatch("controller", command())
+        old_scene = self.app.scene_id
+        with patch.object(self.app, "context"):
+            self.app.start_worker()
+        self.assertNotEqual(self.app.scene_id, old_scene)
+        self.assertEqual(self.app.history, {})
+        self.assertIsNone(self.app.history_entry)
+        self.app.process = None
 
 
 if __name__ == "__main__":

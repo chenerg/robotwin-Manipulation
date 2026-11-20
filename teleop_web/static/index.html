@@ -23,6 +23,29 @@
         <label>任务<select id="task"></select></label>
         <label>场景配置<select id="config"></select></label>
         <label
+          >本体布局<select id="embodiment-mode">
+            <option value="">沿用任务配置</option>
+            <option value="single">完整双臂本体</option>
+            <option value="pair">左右独立本体</option>
+          </select></label
+        >
+        <label id="embodiment-left-field" hidden
+          >本体 / 左臂<select id="embodiment-left"></select
+        ></label>
+        <label id="embodiment-right-field" hidden
+          >右臂本体<select id="embodiment-right"></select
+        ></label>
+        <label id="embodiment-spacing-field" hidden
+          >两臂间距（cm）<input
+            id="embodiment-spacing"
+            type="number"
+            min="0.01"
+            step="any"
+            value="60"
+        /></label>
+        <label>主相机<select id="head-camera-type"></select></label>
+        <label>腕部相机<select id="wrist-camera-type"></select></label>
+        <label
           >随机种子<input
             id="seed"
             type="number"
@@ -69,11 +92,11 @@
           >轴长<input
             id="axis-length"
             type="number"
-            min="0.005"
-            max="1"
-            step="0.005"
-            value="0.05"
-          />m</label
+            min="0.5"
+            max="100"
+            step="0.5"
+            value="5"
+          />cm</label
         >
         <span class="legend"
           ><b class="x">X</b><b class="y">Y</b><b class="z">Z</b></span
@@ -112,8 +135,15 @@
       </div>
       <section class="history">
         <div class="history-heading">
-          <h2>操作记录</h2>
-          <button id="clear-log">清空记录</button>
+          <h2>当前 episode 命令</h2>
+          <span>重建场景后清空 · 不保存到磁盘</span>
+        </div>
+        <ol id="command-history" aria-live="polite"></ol>
+      </section>
+      <section class="history">
+        <div class="history-heading">
+          <h2>状态日志</h2>
+          <button id="clear-log">清空日志</button>
         </div>
         <ol id="log" aria-live="polite"></ol>
       </section>

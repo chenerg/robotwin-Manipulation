@@ -20,16 +20,42 @@ ssh -L 8080:127.0.0.1:8080 user@simulation-host
 
 也可按需要使用 `--host 0.0.0.0` 绑定机器网络接口。服务默认只绑定本机，未实现用户登录。
 
+启动时可覆盖任务配置中的本体和相机：
+
+```bash
+python scripts/teleop_web.py \
+  --task-name handover_block --task-config demo_clean \
+  --embodiment aloha-agilex \
+  --head-camera-type Large_L515 --wrist-camera-type Large_L515
+
+# 左右独立安装的本体，第三个值为间距（启动参数使用米）
+python scripts/teleop_web.py \
+  --task-name handover_block --embodiment franka-panda franka-panda 0.6
+```
+
+本体选项直接来自 `env_cfg/task_config/_embodiment_config.yml`，相机选项来自
+`env_cfg/task_config/_camera_config.yml`。未指定时沿用所选任务配置。
+`L515` 为 320×180、垂直视场角 45°；`Large_L515` 为 640×360、45°。
+默认 `D435` 为 320×240、37°；`Large_*` 只增加分辨率，不额外扩大视场角。
+这些是仿真透视相机预设，不需要接入真实相机。
+
 ## 使用
 
 - 启动参数确定初始 `task_name`、`task_config`、`seed`。页面也可选择任务和配置，
   修改 seed，再点击“重建所选场景”。同一 seed 重建当前配置；不自动寻找其他可用 seed。
+- 页面可选择本体布局、注册本体，以及主/腕部相机预设，点击“重建所选场景”生效。
+  “完整双臂本体”加载一套双臂机器人；“左右独立本体”分别加载左右机器人并设置间距
+  （页面使用 cm）。选项不按本地资产过滤；资产缺失或不兼容时显示初始化错误。
 - 初始化只调用任务的 `setup_demo()`，不执行专家 `play_once()`。场景初始化失败时，
   页面显示具体错误，仍可选择其他配置或重试。
 - 页面显示主相机、左腕相机和右腕相机。缺少机器人资产、SAPIEN/CuRobo 或可用的
   渲染设备时，不能获得真实仿真画面；页面不会用示例图片替代。
-- 左右控制面板分别接受 `Δx/Δy/Δz`（米）和 `Δroll/Δpitch/Δyaw`（度）。
+- 左右控制面板分别接受 `Δx/Δy/Δz`（cm）和 `Δroll/Δpitch/Δyaw`（度）。
   “执行左臂”“执行右臂”只控制选中的机械臂；“双臂一起执行”执行两组输入。
+  页面将 cm 除以 100 后发送，协议字段 `translation_m` 和仿真仍使用米。
+  实际/目标位置、坐标轴长度的页面显示也使用 cm。
+- 命令成功、失败或停止后，仅清零参与执行机械臂的平移与旋转输入，夹爪设置保留。
+  校验失败或服务端拒绝时保留输入；运动期间禁用运动输入，避免覆盖下一条命令。
 - 如需抓取，勾选“同时设置夹爪开合”，填写 `[0,1]` 开合目标，0 为闭合，1 为张开。
   不勾选时保留原开合目标。
 - 一次只执行一条运动命令，忙碌时拒绝后续运动。一次双臂命令只有两侧规划均成功
@@ -38,6 +64,10 @@ ssh -L 8080:127.0.0.1:8080 user@simulation-host
   会等待当前规划调用返回并丢弃结果；期间不能发送新运动。重建场景可结束整个旧进程。
 - 一个网页持有控制权，其他网页可以观看图像。控制页面断开时停止其正在执行的运动，
   释放控制权；重新连接或其他页面可获取控制权。
+- “当前 episode 命令”按命令记录左右臂增量、夹爪目标、起始/目标/结束实际位姿、
+  执行结果与到达误差（后端提供时）。点开记录查看详情；同一场景刷新或重连可恢复。
+  历史只保存在服务端内存，重建场景后清空，服务退出后丢失，不写入磁盘。
+  “状态日志”独立显示状态变化，清空日志不影响命令历史。
 
 ## 相对运动的定义
 
@@ -88,8 +118,8 @@ HTTP 与两个 WebSocket 共用一个端口：
 | 端点 | 用途 |
 | --- | --- |
 | `/` | 网页 |
-| `/api/state` | 当前场景与控制状态 |
-| `/api/catalog` | task 与 task config 列表 |
+| `/api/state` | 当前场景、控制状态与当前 episode 命令历史 |
+| `/api/catalog` | task、task config、本体与相机预设列表 |
 | `/ws/control` | JSON 命令、控制权和执行结果 |
 | `/ws/frames` | 三路同步 JPEG 帧包 |
 
@@ -115,6 +145,7 @@ python scripts/teleop_web.py --help
 ```bash
 python -m pytest -q tests/test_teleop_web.py
 node tests/teleop_overlay_test.mjs
+node tests/teleop_controls_test.mjs
 ```
 
 测试中的控制替身只验证状态和执行顺序，不模拟物理，不能替代 SAPIEN 验收。

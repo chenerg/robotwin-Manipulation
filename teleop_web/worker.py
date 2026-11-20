@@ -96,7 +96,12 @@ def run_worker(settings, scene_id, commands, events, frames):
 
         emit({"type": "state", "phase": "starting"})
         session = RobotwinSession(
-            settings["task_name"], settings["task_config"], settings["seed"]
+            settings["task_name"],
+            settings["task_config"],
+            settings["seed"],
+            settings.get("embodiment"),
+            settings.get("head_camera_type"),
+            settings.get("wrist_camera_type"),
         )
         controller = Controller(
             session,

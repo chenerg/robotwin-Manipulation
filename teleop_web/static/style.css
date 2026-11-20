@@ -11,6 +11,9 @@
 * {
   box-sizing: border-box;
 }
+[hidden] {
+  display: none !important;
+}
 body {
   margin: 0;
   background: var(--bg);
@@ -115,6 +118,7 @@ button:focus-visible {
 }
 .toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
   gap: 15px;
   padding: 16px 18px;
@@ -345,6 +349,30 @@ aside > button {
 .history button {
   padding: 4px 10px;
   font-size: 11px;
+}
+.history-heading > span {
+  color: var(--muted);
+  font-size: 12px;
+}
+#command-history {
+  max-height: 380px;
+  overflow: auto;
+  padding-left: 24px;
+}
+#command-history li {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+#command-history summary {
+  cursor: pointer;
+}
+#command-history pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font:
+    12px/1.8 ui-monospace,
+    monospace;
 }
 #log {
   list-style: none;

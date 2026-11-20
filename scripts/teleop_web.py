@@ -14,6 +14,14 @@ def main():
     parser.add_argument("--task-name", required=True)
     parser.add_argument("--task-config", default="demo_clean")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--embodiment",
+        nargs="+",
+        metavar="VALUE",
+        help="Registered NAME, or LEFT RIGHT SPACING_M; defaults to task config",
+    )
+    parser.add_argument("--head-camera-type", help="Camera registry preset, e.g. L515")
+    parser.add_argument("--wrist-camera-type", help="Camera registry preset, e.g. L515")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--fps", type=float, default=10)
@@ -31,10 +39,18 @@ def main():
         help="Arrival tolerance in degrees",
     )
     args = parser.parse_args()
-    from teleop_web.session import validate_scene
+    from teleop_web.session import normalize_embodiment, validate_scene
 
     try:
-        validate_scene(args.task_name, args.task_config, args.seed)
+        args.embodiment = normalize_embodiment(args.embodiment)
+        validate_scene(
+            args.task_name,
+            args.task_config,
+            args.seed,
+            args.embodiment,
+            args.head_camera_type,
+            args.wrist_camera_type,
+        )
         import math
 
         if not math.isfinite(args.fps) or not 0 < args.fps <= 60:

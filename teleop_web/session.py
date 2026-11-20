@@ -2,6 +2,7 @@
 
 import copy
 import importlib
+import math
 import os
 import random
 from pathlib import Path
@@ -11,6 +12,11 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG_ROOT = ROOT / "env_cfg" / "task_config"
+
+
+def registry(name):
+    with (CONFIG_ROOT / name).open() as file:
+        return yaml.safe_load(file)
 
 
 def catalog():
@@ -23,10 +29,41 @@ def catalog():
         "task_configs": sorted(
             p.stem for p in CONFIG_ROOT.glob("*.yml") if not p.stem.startswith("_")
         ),
+        "embodiments": sorted(registry("_embodiment_config.yml")),
+        "camera_types": sorted(registry("_camera_config.yml")),
     }
 
 
-def validate_scene(task_name, task_config, seed):
+def normalize_embodiment(value):
+    """Use RoboTwin's [dual robot] or [left robot, right robot, spacing] form."""
+    if value is None:
+        return None
+    if not isinstance(value, (list, tuple)) or len(value) not in (1, 3):
+        raise ValueError("embodiment must contain NAME or LEFT RIGHT SPACING_M")
+    names = value[:1] if len(value) == 1 else value[:2]
+    choices = registry("_embodiment_config.yml")
+    if any(not isinstance(name, str) or name not in choices for name in names):
+        raise ValueError("Unknown embodiment; choose a name from the registry")
+    result = list(names)
+    if len(value) == 3:
+        try:
+            spacing = float(value[2])
+        except (TypeError, ValueError):
+            raise ValueError("Embodiment spacing must be positive and finite") from None
+        if isinstance(value[2], bool) or not math.isfinite(spacing) or spacing <= 0:
+            raise ValueError("Embodiment spacing must be positive and finite")
+        result.append(spacing)
+    return result
+
+
+def validate_scene(
+    task_name,
+    task_config,
+    seed,
+    embodiment=None,
+    head_camera_type=None,
+    wrist_camera_type=None,
+):
     choices = catalog()
     if task_name not in choices["tasks"]:
         raise ValueError(f"Unknown task_name: {task_name}")
@@ -34,16 +71,29 @@ def validate_scene(task_name, task_config, seed):
         raise ValueError(f"Unknown task_config: {task_config}")
     if isinstance(seed, bool) or not isinstance(seed, int) or not 0 <= seed < 2**32:
         raise ValueError("seed must be an integer in [0, 2**32)")
+    normalize_embodiment(embodiment)
+    for camera in (head_camera_type, wrist_camera_type):
+        if camera is not None and (
+            not isinstance(camera, str) or camera not in choices["camera_types"]
+        ):
+            raise ValueError(f"Unknown camera type: {camera}")
 
 
-def load_task_args(task_name, task_config):
+def load_task_args(
+    task_name,
+    task_config,
+    embodiment=None,
+    head_camera_type=None,
+    wrist_camera_type=None,
+):
     with (CONFIG_ROOT / f"{task_config}.yml").open() as file:
         args = copy.deepcopy(yaml.safe_load(file))
     with (CONFIG_ROOT / "_embodiment_config.yml").open() as file:
         embodiments = yaml.safe_load(file)
-    types = args["embodiment"]
-    if len(types) not in (1, 3):
-        raise ValueError("embodiment must contain one robot or left/right/spacing")
+    types = normalize_embodiment(
+        embodiment if embodiment is not None else args["embodiment"]
+    )
+    args["embodiment"] = types
     for arm, robot in (
         ("left", types[0]),
         ("right", types[0] if len(types) == 1 else types[1]),
@@ -73,6 +123,14 @@ def load_task_args(task_name, task_config):
         need_plan=True,
     )
     args["camera"].update(collect_head_camera=True, collect_wrist_camera=True)
+    for key, value in (
+        ("head_camera_type", head_camera_type),
+        ("wrist_camera_type", wrist_camera_type),
+    ):
+        if value is not None:
+            if value not in registry("_camera_config.yml"):
+                raise ValueError(f"Unknown camera type: {value}")
+            args["camera"][key] = value
     args["data_type"] = {"rgb": True, "endpose": True, "qpos": True}
     with (CONFIG_ROOT / "_camera_config.yml").open() as file:
         camera = yaml.safe_load(file)[args["camera"]["head_camera_type"]]
@@ -81,10 +139,20 @@ def load_task_args(task_name, task_config):
 
 
 class RobotwinSession:
-    def __init__(self, task_name, task_config, seed):
+    def __init__(
+        self,
+        task_name,
+        task_config,
+        seed,
+        embodiment=None,
+        head_camera_type=None,
+        wrist_camera_type=None,
+    ):
         self.env = None
         os.chdir(ROOT)  # Existing task/asset code uses repository-relative paths.
-        args = load_task_args(task_name, task_config)
+        args = load_task_args(
+            task_name, task_config, embodiment, head_camera_type, wrist_camera_type
+        )
         random.seed(seed)
         module = importlib.import_module(f"envs.{task_name}")
         self.env = getattr(module, task_name)()

@@ -1,6 +1,7 @@
 """HTTP + separate control/frame WebSockets, with an isolated scene process."""
 
 import asyncio
+import copy
 import json
 import mimetypes
 import multiprocessing as mp
@@ -8,6 +9,7 @@ import os
 import queue
 import signal
 import struct
+import time
 import uuid
 from contextlib import suppress
 from http import HTTPStatus
@@ -20,7 +22,7 @@ from websockets.exceptions import ConnectionClosed
 from websockets.http11 import Response
 
 from .protocol import BUSY_PHASES, validate_move
-from .session import catalog, validate_scene
+from .session import catalog, normalize_embodiment, validate_scene
 from .worker import run_worker
 
 STATIC = Path(__file__).with_name("static")
@@ -39,14 +41,16 @@ class TeleopServer:
         self.owner = None
         self.controls = {}
         self.seen_commands = set()
+        self.history = {}
+        self.history_entry = None
         self.packet = None
         self.frame_version = 0
         self.frame_changed = asyncio.Condition()
         self.resetting = False
         self.reset_task = None
 
-    def snapshot(self):
-        return {
+    def snapshot(self, include_history=False):
+        result = {
             "type": "snapshot",
             "scene_id": self.scene_id,
             "phase": self.phase,
@@ -55,7 +59,36 @@ class TeleopServer:
             "owner": self.owner,
             "last_event": self.last_event,
             "observation": self.last_observation,
+            "history_entry": self.history_entry,
         }
+        if include_history:
+            result["history"] = list(self.history.values())
+        return result
+
+    def record_event(self, event):
+        """Keep one in-memory row per admitted command for this scene only."""
+        command_id = event.get("command_id")
+        if command_id in self.history:
+            entry = {**self.history[command_id], "updated_at": time.time()}
+            entry["phase"] = (
+                "rejected" if event["type"] == "rejected" else event["phase"]
+            )
+            for key in ("base_poses", "targets", "actual_poses", "errors", "error"):
+                if key in event:
+                    entry[key] = event[key]
+            self.history[command_id] = self.history_entry = entry
+        elif event.get("phase") == "error":
+            # Preserve an outcome even when the simulator exits mid-command.
+            for entry in list(self.history.values()):
+                if entry["phase"] in BUSY_PHASES:
+                    self.record_event(
+                        {
+                            "type": "state",
+                            "command_id": entry["command_id"],
+                            "phase": "failed",
+                            "error": event.get("error", "Simulator unavailable"),
+                        }
+                    )
 
     def broadcast(self, message):
         for channel in list(self.controls.values()):
@@ -74,6 +107,8 @@ class TeleopServer:
         self.last_observation = None
         self.packet = None
         self.seen_commands.clear()
+        self.history.clear()
+        self.history_entry = None
         self.commands = self.context.Queue(maxsize=32)
         self.events = self.context.Queue(maxsize=128)
         self.frames = self.context.Queue(maxsize=1)
@@ -144,6 +179,7 @@ class TeleopServer:
                         break
                     if event.get("scene_id") != self.scene_id:
                         continue
+                    self.record_event(event)
                     if event["type"] == "state":
                         self.phase = event["phase"]
                         if event.get("command_id") and event[
@@ -187,6 +223,9 @@ class TeleopServer:
                         self.last_event = {
                             "error": f"Simulator exited (code {self.process.exitcode})"
                         }
+                        self.record_event(
+                            {"type": "state", "phase": "error", **self.last_event}
+                        )
                         self.broadcast(self.snapshot())
                     self.dead_seen = self.scene_id
             await asyncio.sleep(0.02)
@@ -209,10 +248,23 @@ class TeleopServer:
             raise ValueError("Scene changed; use the current scene_id")
         if kind == "reset":
             settings = dict(self.settings)
-            for key in ("task_name", "task_config", "seed"):
-                settings[key] = message.get(key, settings[key])
+            for key in (
+                "task_name",
+                "task_config",
+                "seed",
+                "embodiment",
+                "head_camera_type",
+                "wrist_camera_type",
+            ):
+                settings[key] = message.get(key, settings.get(key))
+            settings["embodiment"] = normalize_embodiment(settings["embodiment"])
             validate_scene(
-                settings["task_name"], settings["task_config"], settings["seed"]
+                settings["task_name"],
+                settings["task_config"],
+                settings["seed"],
+                settings["embodiment"],
+                settings["head_camera_type"],
+                settings["wrist_camera_type"],
             )
             # Claim busy state before yielding to the reset task.
             self.resetting = True
@@ -235,6 +287,15 @@ class TeleopServer:
             raise ValueError("Reset the scene before sending more commands")
         self.commands.put_nowait(command)
         self.seen_commands.add(command["command_id"])
+        now = time.time()
+        entry = {
+            **copy.deepcopy(command),
+            "sequence": len(self.history) + 1,
+            "accepted_at": now,
+            "updated_at": now,
+            "phase": "accepted",
+        }
+        self.history[command["command_id"]] = self.history_entry = entry
         self.phase = "accepted"
         self.last_event = {"command_id": command["command_id"], "phase": "accepted"}
         self.broadcast(self.snapshot())
@@ -249,7 +310,7 @@ class TeleopServer:
                     "type": "hello",
                     "client_id": client_id,
                     "catalog": catalog(),
-                    "state": self.snapshot(),
+                    "state": self.snapshot(include_history=True),
                 }
             )
         )
@@ -265,16 +326,21 @@ class TeleopServer:
         sender = asyncio.create_task(send_events())
         try:
             async for raw in connection:
+                message = None
                 try:
                     if not isinstance(raw, str):
                         raise TypeError("Control messages must be JSON text")
-                    self.dispatch(client_id, json.loads(raw))
+                    message = json.loads(raw)
+                    self.dispatch(client_id, message)
                 except (ValueError, TypeError, queue.Full) as exc:
                     try:
                         channel.put_nowait(
                             {
                                 "type": "rejected",
                                 "error": str(exc) or "Command queue is full",
+                                "command_id": message.get("command_id")
+                                if isinstance(message, dict)
+                                else None,
                             }
                         )
                     except asyncio.QueueFull:
@@ -352,7 +418,7 @@ class TeleopServer:
             return None
         if path == "/api/state":
             body, content_type = (
-                json.dumps(self.snapshot()).encode(),
+                json.dumps(self.snapshot(include_history=True)).encode(),
                 "application/json",
             )
         elif path == "/api/catalog":
