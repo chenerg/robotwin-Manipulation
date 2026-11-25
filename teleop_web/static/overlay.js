@@ -80,7 +80,15 @@ export function projectAxes(axes, camera, length) {
   });
 }
 
-function arrow(context, start, end, color, label, tip = true) {
+function arrow(
+  context,
+  start,
+  end,
+  color,
+  label,
+  tip = true,
+  viewport = context.canvas,
+) {
   const [x, y] = end,
     angle = Math.atan2(y - start[1], x - start[0]);
   context.strokeStyle = color;
@@ -104,8 +112,8 @@ function arrow(context, start, end, color, label, tip = true) {
     context.fill();
     context.strokeStyle = "#09111d";
     context.lineWidth = 3;
-    const tx = Math.max(2, Math.min(context.canvas.width - 30, x + 5));
-    const ty = Math.max(13, Math.min(context.canvas.height - 4, y - 5));
+    const tx = Math.max(2, Math.min(viewport.width - 30, x + 5));
+    const ty = Math.max(13, Math.min(viewport.height - 4, y - 5));
     context.strokeText(label, tx, ty);
     context.fillText(label, tx, ty);
     context.lineWidth = 2;
@@ -132,14 +140,27 @@ export function drawAxes(context, camera, options) {
         );
     });
     if (!originVisible(axes, camera)) {
-      const x = 14 + inset++ * 132,
-        y = camera.height - 100;
+      const viewport = { width: 124, height: 91 };
+      // Fit each inset within one quarter of this camera's width and height.
+      // Scale its text, strokes and arrowheads together with the panel.
+      const scale = Math.min(
+        camera.width / (4 * viewport.width),
+        camera.height / (4 * viewport.height),
+      );
+      const x = (14 + inset++ * 132) * scale,
+        y = camera.height - 100 * scale;
+      context.save();
+      context.translate(x, y);
+      context.scale(scale, scale);
+      context.beginPath();
+      context.rect(0, 0, viewport.width, viewport.height);
+      context.clip();
       context.fillStyle = "#08121de0";
-      context.fillRect(x, y, 124, 91);
+      context.fillRect(0, 0, viewport.width, viewport.height);
       context.fillStyle = "#dce9f8";
       context.font = "11px system-ui";
-      context.fillText(`${prefix} · TCP 轴向（非原点）`, x + 5, y + 15);
-      const start = [x + 61, y + 58];
+      context.fillText(`${prefix} · TCP 轴向（非原点）`, 5, 15, 114);
+      const start = [61, 58];
       [0, 1, 2].forEach((axis) => {
         const vx = axes.basis[0][axis],
           vy = axes.basis[1][axis],
@@ -158,8 +179,11 @@ export function drawAxes(context, camera, options) {
             [start[0] + vx * 28, start[1] + vy * 28],
             axisColors[axis],
             "XYZ"[axis],
+            true,
+            viewport,
           );
       });
+      context.restore();
     }
   }
   context.restore();
