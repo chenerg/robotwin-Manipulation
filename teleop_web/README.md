@@ -37,6 +37,10 @@ python scripts/teleop_web.py \
 `env_cfg/task_config/_camera_config.yml`。未指定时沿用所选任务配置。
 `L515` 为 320×180、垂直视场角 45°；`Large_L515` 为 640×360、45°。
 默认 `D435` 为 320×240、37°；`Large_*` 只增加分辨率，不额外扩大视场角。
+需要更大视野时，可选择 `Wide_L515`、`Large_Wide_L515`、`Wide_D435` 或
+`Large_Wide_D435`：垂直视场角均为 60°，分辨率与对应的原预设一致。
+例如使用 `--head-camera-type Wide_L515 --wrist-camera-type Wide_D435`，
+或在网页选择后重建场景。
 这些是仿真透视相机预设，不需要接入真实相机。
 
 ## 使用

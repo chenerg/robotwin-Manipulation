@@ -8,6 +8,11 @@ Large_L515:
   w: 640
   h: 360
 
+W515:
+  fovy: 60
+  w: 320
+  h: 180
+
 D435:
   fovy: 37
   w: 320
@@ -15,5 +20,26 @@ D435:
 
 Large_D435:
   fovy: 37
+  w: 640
+  h: 480
+
+# Wide simulation presets: vertical FOV in degrees; keep the base resolution.
+Wide_L515:
+  fovy: 60
+  w: 320
+  h: 180
+
+Large_Wide_L515:
+  fovy: 60
+  w: 640
+  h: 360
+
+Wide_D435:
+  fovy: 60
+  w: 320
+  h: 240
+
+Large_Wide_D435:
+  fovy: 60
   w: 640
   h: 480
