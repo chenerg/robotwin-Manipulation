@@ -111,7 +111,7 @@ function arrow(
     context.closePath();
     context.fill();
     context.strokeStyle = "#09111d";
-    context.lineWidth = 3;
+    context.lineWidth = 1.5;
     const tx = Math.max(2, Math.min(viewport.width - 30, x + 5));
     const ty = Math.max(13, Math.min(viewport.height - 4, y - 5));
     context.strokeText(label, tx, ty);
@@ -122,7 +122,7 @@ function arrow(
 
 export function drawAxes(context, camera, options) {
   context.save();
-  context.font = "bold 12px system-ui";
+  context.font = "bold 9px system-ui";
   context.lineWidth = 2;
   let inset = 0;
   for (const [arm, axes] of Object.entries(camera.axes)) {
@@ -141,12 +141,13 @@ export function drawAxes(context, camera, options) {
     });
     if (!originVisible(axes, camera)) {
       const viewport = { width: 124, height: 91 };
-      // Fit each inset within one quarter of this camera's width and height.
-      // Scale its text, strokes and arrowheads together with the panel.
-      const scale = Math.min(
-        camera.width / (4 * viewport.width),
-        camera.height / (4 * viewport.height),
-      );
+      // Enlarge the quarter-frame inset by 1.5 in both dimensions.
+      const scale =
+        1.5 *
+        Math.min(
+          camera.width / (4 * viewport.width),
+          camera.height / (4 * viewport.height),
+        );
       const x = (14 + inset++ * 132) * scale,
         y = camera.height - 100 * scale;
       context.save();
@@ -158,7 +159,8 @@ export function drawAxes(context, camera, options) {
       context.fillStyle = "#08121de0";
       context.fillRect(0, 0, viewport.width, viewport.height);
       context.fillStyle = "#dce9f8";
-      context.font = "11px system-ui";
+      // Keep labels smaller even with the enlarged panel and coordinate axes.
+      context.font = "6px system-ui";
       context.fillText(`${prefix} · TCP 轴向（非原点）`, 5, 15, 114);
       const start = [61, 58];
       [0, 1, 2].forEach((axis) => {
